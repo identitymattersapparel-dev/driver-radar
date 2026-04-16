@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { parseTargetTime } from "../utils/time";
 
 export default function StartScreen({ onStart }) {
