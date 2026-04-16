@@ -341,8 +341,29 @@ body { background: #0a0c0f; }
   padding: 18px 20px;
   text-align: center;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 .dr-complete-banner span { font-size: 20px; font-weight: 900; color: #4ade80; letter-spacing: 2px; text-transform: uppercase; }
+
+.dr-btn-new-route {
+  background: #0a0c0f;
+  border: 2px solid #22c55e;
+  border-radius: 12px;
+  color: #4ade80;
+  font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 14px;
+  width: 100%;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dr-btn-new-route:active { background: #111318; transform: scale(0.97); }
 
 /* ── Notes panel ── */
 .np-overlay {
