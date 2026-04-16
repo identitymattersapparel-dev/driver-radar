@@ -10,44 +10,56 @@ import {
   getActiveAlert,
 } from "../utils/notes";
 
-const speechSupported = !!(
-  window.SpeechRecognition || window.webkitSpeechRecognition
-);
+// ── Audio transcription via Netlify Function ──────────────────────────────────
+
+async function transcribeAudio(blob) {
+  const formData = new FormData();
+  formData.append("file", blob, "audio.webm");
+
+  const res = await fetch("/.netlify/functions/transcribe", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Transcription request failed: ${res.status}`);
+  }
+
+  const json = await res.json();
+  return (json.text || "").trim();
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function MainScreen({ session, globalNotes, onStopComplete, onSaveNote, onStartNewRoute }) {
   const { totalStops, completedStops, startTime, targetFinishTime, notes } = session;
 
-  const [, setTick]                     = useState(0);
-  const [alertVisible, setAlertVisible] = useState(true);
-  const [isRecording, setIsRecording]   = useState(false);
-  const [voiceStatus, setVoiceStatus]   = useState(null);
-  const [notesOpen, setNotesOpen]       = useState(false);
-  const [pendingNote, setPendingNote]   = useState(null);
-  const [locInput, setLocInput]         = useState("");
+  const [, setTick]                         = useState(0);
+  const [alertVisible, setAlertVisible]     = useState(true);
+  const [isRecording, setIsRecording]       = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceStatus, setVoiceStatus]       = useState(null);
+  const [notesOpen, setNotesOpen]           = useState(false);
+  const [pendingNote, setPendingNote]       = useState(null);
+  const [locInput, setLocInput]             = useState("");
 
-  const recognitionRef   = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef   = useRef([]);
   const statusTimerRef   = useRef(null);
-  const resultHandledRef = useRef(false);
 
-  // Refresh pace/finish time every 15s
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 15000);
     return () => clearInterval(id);
   }, []);
 
-  // Re-show alert when driver advances to the next stop
-  useEffect(() => {
-    setAlertVisible(true);
-  }, [completedStops]);
+  useEffect(() => { setAlertVisible(true); }, [completedStops]);
 
-  // Clean up speech recognition on unmount
-  useEffect(
-    () => () => {
-      if (recognitionRef.current) recognitionRef.current.abort();
-      clearTimeout(statusTimerRef.current);
-    },
-    []
-  );
+  useEffect(() => () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    clearTimeout(statusTimerRef.current);
+  }, []);
 
   function showStatus(text, type) {
     clearTimeout(statusTimerRef.current);
@@ -74,86 +86,86 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
     showStatus("Note saved", "saved");
   }
 
-  function startRecording() {
-    if (!speechSupported) {
-      showStatus("Voice not supported", "error");
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showStatus("Microphone not supported", "error");
       return;
     }
 
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SR();
-    rec.continuous     = false;
-    rec.interimResults = false;
-    rec.lang           = "en-US";
-    resultHandledRef.current = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
 
-    rec.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map((r) => r[0].transcript)
-        .join(" ")
-        .trim();
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
 
-      if (transcript) {
-        setPendingNote({
-          id:           Date.now(),
-          text:         transcript,
-          createdAt:    Date.now(),
-          stopNumber:   completedStops + 1,
-          routeStopKey: completedStops + 1,
-          locationKey:  null,
-        });
-        setLocInput("");
-      } else {
-        showStatus("No speech detected", "info");
-      }
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
 
-      resultHandledRef.current = true;
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
 
-    rec.onerror = (event) => {
-      if (!resultHandledRef.current) {
-        showStatus(
-          event.error === "no-speech" ? "No speech detected" : "Recording error",
-          event.error === "no-speech" ? "info" : "error"
-        );
-        resultHandledRef.current = true;
-      }
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        audioChunksRef.current = [];
 
-    rec.onend = () => {
-      if (!resultHandledRef.current) {
-        showStatus("No speech detected", "info");
-        resultHandledRef.current = true;
-      }
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
+        if (blob.size < 1000) {
+          showStatus("No speech detected", "info");
+          setIsTranscribing(false);
+          return;
+        }
 
-    recognitionRef.current = rec;
-    rec.start();
-    setIsRecording(true);
-    setVoiceStatus(null);
+        setIsTranscribing(true);
+
+        try {
+          const transcript = await transcribeAudio(blob);
+
+          if (transcript) {
+            setPendingNote({
+              id:           Date.now(),
+              text:         transcript,
+              createdAt:    Date.now(),
+              stopNumber:   completedStops + 1,
+              routeStopKey: completedStops + 1,
+              locationKey:  null,
+            });
+            setLocInput("");
+          } else {
+            showStatus("No speech detected", "info");
+          }
+        } catch (err) {
+          console.error("[MainScreen] transcribeAudio:", err);
+          showStatus("Transcription error", "error");
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+      setVoiceStatus(null);
+    } catch (err) {
+      console.error("[MainScreen] startRecording:", err);
+      showStatus("Microphone access denied", "error");
+    }
   }
 
   function stopRecording() {
-    if (recognitionRef.current) recognitionRef.current.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecording(false);
   }
 
   function handleVoiceTap() {
+    if (isTranscribing) return;
     isRecording ? stopRecording() : startRecording();
   }
 
   function handleStopComplete() {
-    if (isRecording) return;
+    if (isRecording || isTranscribing) return;
     onStopComplete();
   }
-
-  // ── Derived values ────────────────────────────────────────────────────────
 
   const remaining  = totalStops - completedStops;
   const routeDone  = remaining === 0;
@@ -162,7 +174,6 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
   const color      = paceColor(pace);
   const noteCount  = notes.filter(isValidNote).length;
 
-  // locationKey of the most recent session note for the upcoming stop (if any)
   const sessionStopNotes   = notes.filter((n) => n.stopNumber === nextStop && isValidNote(n));
   const currentLocationKey = sessionStopNotes.length
     ? mostRecent(sessionStopNotes).locationKey || null
@@ -189,20 +200,17 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       " · Stop #" + nextStop
     : null;
 
+  const voiceBtnLabel = isTranscribing ? "TRANSCRIBING..." : isRecording ? "LISTENING..." : "VOICE NOTE";
+
   const completeBtnClass = [
     "dr-btn-complete",
-    routeDone   ? "done"   : "",
-    isRecording ? "locked" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  // ── Render ────────────────────────────────────────────────────────────────
+    routeDone                     ? "done"   : "",
+    isRecording || isTranscribing ? "locked" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <div className="dr">
 
-      {/* Status bar */}
       <div className="dr-status">
         <div className="dr-pace">
           <div className="dr-pace-dot" style={{ background: color }} />
@@ -223,7 +231,6 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         </div>
       </div>
 
-      {/* Map placeholder */}
       <div className="dr-map">
         <div className="dr-map-grid" />
         <svg
@@ -242,7 +249,6 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         {!routeDone && <div className="dr-map-tag">NEXT: #{nextStop}</div>}
       </div>
 
-      {/* Action buttons */}
       <div className="dr-actions">
         <button className={completeBtnClass} onClick={handleStopComplete}>
           {routeDone ? "ROUTE DONE" : "STOP COMPLETE"}
@@ -254,26 +260,24 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         </button>
 
         <button
-          className={"dr-btn-voice" + (isRecording ? " recording" : "")}
+          className={"dr-btn-voice" + (isRecording ? " recording" : "") + (isTranscribing ? " transcribing" : "")}
           onClick={handleVoiceTap}
         >
           <div className="voice-dot-row">
             <div className="voice-dot" />
-            <span className={"dr-voice-label" + (isRecording ? " recording-label" : "")}>
-              {isRecording ? "LISTENING..." : "VOICE NOTE"}
+            <span className={"dr-voice-label" + (isRecording || isTranscribing ? " recording-label" : "")}>
+              {voiceBtnLabel}
             </span>
           </div>
         </button>
       </div>
 
-      {/* Voice status strip */}
       {!pendingNote && voiceStatus && (
         <div className={"dr-voice-status " + voiceStatus.type}>
           <span>{voiceStatus.text}</span>
         </div>
       )}
 
-      {/* Location prompt */}
       {pendingNote && (
         <div className="dr-loc-prompt">
           <input
@@ -290,7 +294,6 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         </div>
       )}
 
-      {/* Alert card / route complete banner */}
       {!routeDone && activeAlert && alertVisible ? (
         <div className={"dr-alert" + (alertSource === "global" ? " prev" : "")}>
           <div className="dr-alert-body">
@@ -308,7 +311,6 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         </div>
       ) : null}
 
-      {/* Notes panel */}
       {notesOpen && (
         <NotesPanel notes={notes} onClose={() => setNotesOpen(false)} />
       )}
