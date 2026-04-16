@@ -1,0 +1,99 @@
+const { OpenAI } = require("openai");
+const Busboy = require("busboy");
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Parse multipart/form-data from the incoming Netlify request.
+// Returns a promise that resolves to { filename, buffer, mimeType }.
+function parseMultipart(event) {
+  return new Promise((resolve, reject) => {
+    const contentType = event.headers["content-type"] || event.headers["Content-Type"];
+
+    if (!contentType || !contentType.includes("multipart/form-data")) {
+      return reject(new Error("Expected multipart/form-data"));
+    }
+
+    const busboy = Busboy({ headers: { "content-type": contentType } });
+    const chunks = [];
+    let filename  = "audio.webm";
+    let mimeType  = "audio/webm";
+
+    busboy.on("file", (_field, stream, info) => {
+      filename = info.filename || filename;
+      mimeType = info.mimeType || mimeType;
+      stream.on("data", (d) => chunks.push(d));
+    });
+
+    busboy.on("finish", () => {
+      resolve({ filename, buffer: Buffer.concat(chunks), mimeType });
+    });
+
+    busboy.on("error", reject);
+
+    // Netlify passes the body as base64 when isBase64Encoded is true
+    const body = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64")
+      : Buffer.from(event.body || "");
+
+    busboy.write(body);
+    busboy.end();
+  });
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("[transcribe] OPENAI_API_KEY is not set");
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Server configuration error" }),
+    };
+  }
+
+  let file;
+  try {
+    file = await parseMultipart(event);
+  } catch (err) {
+    console.error("[transcribe] Failed to parse form data:", err.message);
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Could not parse audio upload" }),
+    };
+  }
+
+  if (!file.buffer || file.buffer.length < 100) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Audio file is empty or too small" }),
+    };
+  }
+
+  try {
+    // Wrap the buffer in a File-like object for the OpenAI SDK
+    const audioFile = new File([file.buffer], file.filename, { type: file.mimeType });
+
+    const response = await openai.audio.transcriptions.create({
+      model: "whisper-1",
+      file:  audioFile,
+      language: "en",
+    });
+
+    const text = (response.text || "").trim();
+    console.log(`[transcribe] OK — ${text.length} chars`);
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    };
+  } catch (err) {
+    console.error("[transcribe] OpenAI error:", err.message);
+    return {
+      statusCode: 502,
+      body: JSON.stringify({ error: "Transcription failed" }),
+    };
+  }
+};
