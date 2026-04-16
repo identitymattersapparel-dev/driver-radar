@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import NotesPanel from "./NotesPanel";
 import { formatTime } from "../utils/time";
 import { calcProjectedFinish, getPaceLabel, paceColor } from "../utils/pace";
