@@ -93,6 +93,13 @@ export default function App() {
     });
   }, []);
 
+  // Clears local session so the driver can begin a new route.
+  // Does NOT touch Supabase — completed session and notes remain persisted.
+  const handleStartNewRoute = useCallback(() => {
+    setSession(null);
+    dbSessionIdRef.current = null;
+  }, []);
+
   const handleSaveNote = useCallback(async (note) => {
     // Instant local update
     setSession((prev) =>
@@ -122,6 +129,7 @@ export default function App() {
       globalNotes={globalNotes}
       onStopComplete={handleStopComplete}
       onSaveNote={handleSaveNote}
+      onStartNewRoute={handleStartNewRoute}
     />
   );
 }
