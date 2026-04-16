@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { parseTargetTime } from "../utils/time";
-
+ 
 export default function StartScreen({ onStart }) {
   const [totalStops, setTotalStops] = useState("");
   const [targetTime, setTargetTime] = useState("");
