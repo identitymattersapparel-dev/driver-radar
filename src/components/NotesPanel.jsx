@@ -1,3 +1,4 @@
+import React from "react";
 import { isValidNote } from "../utils/notes";
 import { formatNoteTime } from "../utils/time";
 
