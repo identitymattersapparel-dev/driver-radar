@@ -220,6 +220,8 @@ body { background: #0a0c0f; }
 }
 .dr-btn-voice:active             { transform: scale(0.97); }
 .dr-btn-voice.recording          { background: #450a0a; border-color: #ef4444; }
+.dr-btn-voice.transcribing       { background: #1a1f3a; border-color: #818cf8; }
+.dr-btn-voice.transcribing .voice-dot { background: #818cf8; animation: recordpulse 1.2s ease-in-out infinite; }
 .dr-btn-voice.recording .voice-dot { animation: recordpulse 1s ease-in-out infinite; background: #ef4444; }
 
 .dr-voice-label           { font-size: 30px; font-weight: 900; letter-spacing: 1px; }
