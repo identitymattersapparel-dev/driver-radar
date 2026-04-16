@@ -1,0 +1,19 @@
+export function formatTime(date) {
+  if (!date) return "--:--";
+  let h = date.getHours(), m = date.getMinutes();
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return h + ":" + String(m).padStart(2, "0") + " " + ampm;
+}
+
+export function formatNoteTime(ts) {
+  return formatTime(new Date(ts));
+}
+
+export function parseTargetTime(str) {
+  if (!str) return null;
+  const [h, m] = str.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
