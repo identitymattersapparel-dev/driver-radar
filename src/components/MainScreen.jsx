@@ -14,7 +14,7 @@ const speechSupported = !!(
   window.SpeechRecognition || window.webkitSpeechRecognition
 );
 
-export default function MainScreen({ session, globalNotes, onStopComplete, onSaveNote }) {
+export default function MainScreen({ session, globalNotes, onStopComplete, onSaveNote, onStartNewRoute }) {
   const { totalStops, completedStops, startTime, targetFinishTime, notes } = session;
 
   const [, setTick]                     = useState(0);
@@ -302,6 +302,9 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       ) : routeDone ? (
         <div className="dr-complete-banner">
           <span>Route Complete</span>
+          <button className="dr-btn-new-route" onClick={onStartNewRoute}>
+            START NEW ROUTE
+          </button>
         </div>
       ) : null}
 
