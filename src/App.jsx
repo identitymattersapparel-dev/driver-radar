@@ -10,16 +10,16 @@ import {
 import { createNote, getSessionNotes, getGlobalNotes } from "./services/notes";
 import "./App.css";
 
+function makeLocalSessionKey() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export default function App() {
-  const [session, setSession]         = useState(null);
+  const [session, setSession] = useState(null);
   const [globalNotes, setGlobalNotes] = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const [loading, setLoading] = useState(true);
 
-  // Supabase row id kept in a ref so handlers always see the latest value
-  // without being added to the session shape components depend on.
   const dbSessionIdRef = useRef(null);
-
-  // ── Load persisted state on mount ────────────────────────────────────────
 
   useEffect(() => {
     async function loadPersistedState() {
@@ -33,21 +33,21 @@ export default function App() {
 
         if (activeRow) {
           dbSessionIdRef.current = activeRow.id;
-
           const sessionNotes = await getSessionNotes(activeRow.id);
 
           setSession({
-            totalStops:       activeRow.total_stops,
-            completedStops:   activeRow.completed_stops,
-            startTime:        new Date(activeRow.started_at).getTime(),
+            totalStops: activeRow.total_stops,
+            completedStops: activeRow.completed_stops,
+            startTime: new Date(activeRow.started_at).getTime(),
             targetFinishTime: activeRow.target_finish_time
               ? new Date(activeRow.target_finish_time)
               : null,
             notes: sessionNotes,
+            localSessionKey: makeLocalSessionKey(),
+            dbSessionId: activeRow.id,
           });
         }
       } catch (err) {
-        // Supabase unavailable — fall back to empty local state gracefully
         console.error("[App] Failed to load persisted state:", err);
       } finally {
         setLoading(false);
@@ -57,20 +57,24 @@ export default function App() {
     loadPersistedState();
   }, []);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
-
   const handleStart = useCallback(async (localSession) => {
-    // Show the route screen immediately (optimistic)
-    setSession(localSession);
+    const sessionWithGuards = {
+      ...localSession,
+      localSessionKey: makeLocalSessionKey(),
+      dbSessionId: null,
+    };
+
+    setSession(sessionWithGuards);
 
     const row = await createRouteSession({
-      totalStops:       localSession.totalStops,
-      startTime:        localSession.startTime,
+      totalStops: localSession.totalStops,
+      startTime: localSession.startTime,
       targetFinishTime: localSession.targetFinishTime,
     });
 
     if (row) {
       dbSessionIdRef.current = row.id;
+      setSession((prev) => (prev ? { ...prev, dbSessionId: row.id } : prev));
     }
   }, []);
 
@@ -78,7 +82,7 @@ export default function App() {
     setSession((prev) => {
       if (!prev) return prev;
 
-      const next    = Math.min(prev.completedStops + 1, prev.totalStops);
+      const next = Math.min(prev.completedStops + 1, prev.totalStops);
       const updated = { ...prev, completedStops: next };
 
       if (dbSessionIdRef.current) {
@@ -93,27 +97,59 @@ export default function App() {
     });
   }, []);
 
-  // Clears local session so the driver can begin a new route.
-  // Does NOT touch Supabase — completed session and notes remain persisted.
   const handleStartNewRoute = useCallback(() => {
     setSession(null);
     dbSessionIdRef.current = null;
   }, []);
 
   const handleSaveNote = useCallback(async (note) => {
-    // Instant local update
-    setSession((prev) =>
-      prev ? { ...prev, notes: [...prev.notes, note] } : prev
-    );
+    const currentDbSessionId = dbSessionIdRef.current;
+    let isStale = false;
+
+    setSession((prev) => {
+      if (!prev) {
+        isStale = true;
+        return prev;
+      }
+
+      if (note.localSessionKey !== prev.localSessionKey) {
+        isStale = true;
+        return prev;
+      }
+
+      if (note.dbSessionId && prev.dbSessionId && note.dbSessionId !== prev.dbSessionId) {
+        isStale = true;
+        return prev;
+      }
+
+      return { ...prev, notes: [...prev.notes, note] };
+    });
+
+    if (isStale) {
+      console.warn("[App] Rejected stale note save", note);
+      return false;
+    }
+
     setGlobalNotes((prev) => [...prev, note]);
 
-    // Persist (two rows: one session-scoped, one global-scoped)
-    if (dbSessionIdRef.current) {
-      await createNote(note, dbSessionIdRef.current);
+    if (!currentDbSessionId) {
+      return true;
     }
-  }, []);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+    const ok = await createNote(note, currentDbSessionId);
+
+    if (!ok) {
+      setSession((prev) => (
+        prev
+          ? { ...prev, notes: prev.notes.filter((n) => n.id !== note.id) }
+          : prev
+      ));
+      setGlobalNotes((prev) => prev.filter((n) => n.id !== note.id));
+      return false;
+    }
+
+    return true;
+  }, []);
 
   if (loading) {
     return <div className="dr" />;
