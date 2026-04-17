@@ -1,34 +1,51 @@
 import { supabase } from "../lib/supabase";
 
 const unavailable = (fn) => {
-  console.warn(`[notes] ${fn}: Supabase unavailable — skipping.`);
+  console.warn(`[notes] ${fn}: Supabase unavailable - skipping.`);
 };
 
 export async function createNote(note, sessionId) {
-  if (!supabase) { unavailable("createNote"); return; }
+  if (!supabase) {
+    unavailable("createNote");
+    return false;
+  }
+
+  const text = typeof note?.text === "string" ? note.text.trim() : "";
+  const stopNumber = Number(note?.stopNumber);
+
+  if (!sessionId || !text || !Number.isFinite(stopNumber) || stopNumber < 1) {
+    console.error("[notes] createNote: invalid payload");
+    return false;
+  }
 
   const base = {
-    text:           note.text,
-    created_at:     new Date(note.createdAt).toISOString(),
-    stop_number:    note.stopNumber,
-    route_stop_key: note.routeStopKey ?? note.stopNumber,
-    location_key:   note.locationKey ?? null,
+    text,
+    created_at: new Date(note.createdAt || Date.now()).toISOString(),
+    stop_number: stopNumber,
+    route_stop_key: note.routeStopKey ?? stopNumber,
+    location_key: note.locationKey ?? null,
   };
 
   const rows = [
     { ...base, route_session_id: sessionId, scope: "session" },
-    { ...base, route_session_id: null,      scope: "global"  },
+    { ...base, route_session_id: null, scope: "global" },
   ];
 
   const { error } = await supabase.from("notes").insert(rows);
 
   if (error) {
     console.error("[notes] createNote:", error.message);
+    return false;
   }
+
+  return true;
 }
 
 export async function getSessionNotes(sessionId) {
-  if (!supabase) { unavailable("getSessionNotes"); return []; }
+  if (!supabase) {
+    unavailable("getSessionNotes");
+    return [];
+  }
 
   const { data, error } = await supabase
     .from("notes")
@@ -45,7 +62,10 @@ export async function getSessionNotes(sessionId) {
 }
 
 export async function getGlobalNotes() {
-  if (!supabase) { unavailable("getGlobalNotes"); return []; }
+  if (!supabase) {
+    unavailable("getGlobalNotes");
+    return [];
+  }
 
   const { data, error } = await supabase
     .from("notes")
@@ -62,11 +82,11 @@ export async function getGlobalNotes() {
 
 function dbRowToNote(row) {
   return {
-    id:           row.id,
-    text:         row.text,
-    createdAt:    new Date(row.created_at).getTime(),
-    stopNumber:   row.stop_number,
+    id: row.id,
+    text: row.text,
+    createdAt: new Date(row.created_at).getTime(),
+    stopNumber: row.stop_number,
     routeStopKey: row.route_stop_key,
-    locationKey:  row.location_key ?? null,
+    locationKey: row.location_key ?? null,
   };
 }
