@@ -226,6 +226,7 @@ body { background: #0a0c0f; }
 
 .dr-voice-label           { font-size: 30px; font-weight: 900; letter-spacing: 1px; }
 .dr-voice-label.recording-label { color: #fca5a5; }
+.dr-voice-subtext { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #cbd5e1; }
 .voice-dot  { width: 12px; height: 12px; border-radius: 50%; background: #93c5fd; flex-shrink: 0; }
 .voice-dot-row { display: flex; align-items: center; gap: 8px; }
 
