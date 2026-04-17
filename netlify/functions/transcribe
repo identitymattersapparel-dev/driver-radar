@@ -1,10 +1,19 @@
 const { OpenAI } = require("openai");
+const { toFile } = require("openai/uploads");
 const Busboy = require("busboy");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
+const MIN_AUDIO_BYTES = 2000;
+const OPENAI_TIMEOUT_MS = 15000;
 
-// Parse multipart/form-data from the incoming Netlify request.
-// Returns a promise that resolves to { filename, buffer, mimeType }.
+function json(statusCode, body) {
+  return {
+    statusCode,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
 function parseMultipart(event) {
   return new Promise((resolve, reject) => {
     const contentType = event.headers["content-type"] || event.headers["Content-Type"];
@@ -15,8 +24,8 @@ function parseMultipart(event) {
 
     const busboy = Busboy({ headers: { "content-type": contentType } });
     const chunks = [];
-    let filename  = "audio.webm";
-    let mimeType  = "audio/webm";
+    let filename = "audio.webm";
+    let mimeType = "audio/webm";
 
     busboy.on("file", (_field, stream, info) => {
       filename = info.filename || filename;
@@ -25,14 +34,13 @@ function parseMultipart(event) {
     });
 
     busboy.on("finish", () => {
-      resolve({ filename, buffer: Buffer.concat(chunks), mimeType });
+      resolve({ filename, mimeType, buffer: Buffer.concat(chunks) });
     });
 
     busboy.on("error", reject);
 
-    // Netlify passes the body as base64 when isBase64Encoded is true
     const body = event.isBase64Encoded
-      ? Buffer.from(event.body, "base64")
+      ? Buffer.from(event.body || "", "base64")
       : Buffer.from(event.body || "");
 
     busboy.write(body);
@@ -42,15 +50,12 @@ function parseMultipart(event) {
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+    return json(405, { error: "Method not allowed" });
   }
 
   if (!process.env.OPENAI_API_KEY) {
     console.error("[transcribe] OPENAI_API_KEY is not set");
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Server configuration error" }),
-    };
+    return json(500, { error: "Missing API key" });
   }
 
   let file;
@@ -58,42 +63,57 @@ exports.handler = async (event) => {
     file = await parseMultipart(event);
   } catch (err) {
     console.error("[transcribe] Failed to parse form data:", err.message);
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: "Could not parse audio upload" }),
-    };
+    return json(400, { error: "Could not parse audio upload" });
   }
 
-  if (!file.buffer || file.buffer.length < 100) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: "Audio file is empty or too small" }),
-    };
+  if (!file.buffer || file.buffer.length < MIN_AUDIO_BYTES) {
+    return json(400, { error: "Audio too short" });
   }
+
+  if (file.buffer.length > MAX_AUDIO_BYTES) {
+    return json(413, { error: "Audio too large" });
+  }
+
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
 
   try {
-    // Wrap the buffer in a File-like object for the OpenAI SDK
-    const audioFile = new File([file.buffer], file.filename, { type: file.mimeType });
-
-    const response = await openai.audio.transcriptions.create({
-      model: "whisper-1",
-      file:  audioFile,
-      language: "en",
+    const audioFile = await toFile(file.buffer, file.filename || "audio.webm", {
+      type: file.mimeType || "audio/webm",
     });
 
-    const text = (response.text || "").trim();
-    console.log(`[transcribe] OK — ${text.length} chars`);
+    const response = await openai.audio.transcriptions.create(
+      {
+        model: "gpt-4o-mini-transcribe",
+        file: audioFile,
+        language: "en",
+      },
+      {
+        signal: controller.signal,
+      }
+    );
 
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    };
+    const text = (response.text || "").trim();
+
+    if (!text) {
+      return json(422, { error: "No speech detected" });
+    }
+
+    return json(200, { text });
   } catch (err) {
     console.error("[transcribe] OpenAI error:", err.message);
-    return {
-      statusCode: 502,
-      body: JSON.stringify({ error: "Transcription failed" }),
-    };
+
+    if (err.name === "AbortError") {
+      return json(504, { error: "Transcription timeout" });
+    }
+
+    if (typeof err.message === "string" && /audio|speech|empty|decode/i.test(err.message)) {
+      return json(422, { error: "No speech detected" });
+    }
+
+    return json(502, { error: "Transcription failed" });
+  } finally {
+    clearTimeout(timer);
   }
 };
