@@ -38,6 +38,7 @@ export async function createNote(note, sessionId) {
     route_stop_key: routeStopKey,
     location_key: normalizeLocationKey(note?.locationKey),
     source: note?.source || "typed",
+    scope: "session",
     stop_id: note?.stopId || null,
     location_id: note?.locationId || null,
   };
@@ -110,6 +111,7 @@ function mapNoteRow(row) {
     routeStopKey: row.route_stop_key,
     locationKey: row.location_key,
     source: row.source || "typed",
+    scope: row.scope || "session",
     stopId: row.stop_id || null,
     locationId: row.location_id || null,
     dbSessionId: row.route_session_id || null,
