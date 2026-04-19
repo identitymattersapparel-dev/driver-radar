@@ -424,3 +424,29 @@ body { background: #0a0c0f; }
 .np-note-location { font-size: 12px; font-weight: 700; color: #475569; letter-spacing: 1px; }
 .np-note-time     { font-size: 12px; font-weight: 700; color: #475569; letter-spacing: 1px; flex-shrink: 0; }
 .np-note-text     { font-size: 17px; font-weight: 700; color: #e2e8f0; line-height: 1.4; word-break: break-word; }
+.dr-location-notes {
+  margin: 12px 0 16px;
+  padding: 14px 16px;
+  border: 2px solid #f59e0b;
+  border-radius: 16px;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.dr-location-notes-title {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #fbbf24;
+  margin-bottom: 10px;
+}
+
+.dr-location-note-item {
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 800;
+  color: #fff7ed;
+}
+
+.dr-location-note-item + .dr-location-note-item {
+  margin-top: 8px;
+}
