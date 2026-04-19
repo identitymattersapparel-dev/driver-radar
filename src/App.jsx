@@ -8,6 +8,7 @@ import {
   completeRouteSession,
 } from "./services/routeSessions";
 import { createNote, getSessionNotes, getGlobalNotes } from "./services/notes";
+import { createStop } from "./services/stops";
 import "./App.css";
 
 function makeLocalSessionKey() {
@@ -45,6 +46,10 @@ export default function App() {
             notes: sessionNotes,
             localSessionKey: makeLocalSessionKey(),
             dbSessionId: activeRow.id,
+
+            // Step 7 foundation:
+            // older active sessions may not have hydrated stops loaded yet
+            stops: [],
           });
         }
       } catch (err) {
@@ -62,23 +67,62 @@ export default function App() {
       ...localSession,
       localSessionKey: makeLocalSessionKey(),
       dbSessionId: null,
+      stops: [],
     };
 
     setSession(sessionWithGuards);
 
-    const row = await createRouteSession({
-      totalStops: localSession.totalStops,
-      startTime: localSession.startTime,
-      targetFinishTime: localSession.targetFinishTime,
-    });
+    try {
+      const row = await createRouteSession({
+        totalStops: localSession.totalStops,
+        startTime: localSession.startTime,
+        targetFinishTime: localSession.targetFinishTime,
+      });
 
-    if (row) {
+      if (!row) {
+        throw new Error("Failed to create route session");
+      }
+
       dbSessionIdRef.current = row.id;
-      setSession((prev) => (prev ? { ...prev, dbSessionId: row.id } : prev));
+
+      const inputStops = Array.isArray(localSession.stops) ? localSession.stops : [];
+      const createdStops = [];
+
+      for (let i = 0; i < inputStops.length; i += 1) {
+        const inputStop = inputStops[i];
+
+        const createdStop = await createStop({
+          routeSessionId: row.id,
+          sequenceNumber: i + 1,
+          displayName: inputStop.name || inputStop.displayName || "",
+          addressLine1: inputStop.addressLine1 || inputStop.address || "",
+          addressLine2: inputStop.addressLine2 || "",
+          city: inputStop.city || "",
+          state: inputStop.state || "",
+          postalCode: inputStop.postalCode || "",
+        });
+
+        createdStops.push(createdStop);
+      }
+
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              dbSessionId: row.id,
+              stops: createdStops,
+            }
+          : prev
+      );
+    } catch (err) {
+      console.error("[App] Failed to start route:", err);
+      dbSessionIdRef.current = null;
+      setSession(null);
+      alert("Could not start route.");
     }
   }, []);
 
-  const handleStopComplete = useCallback(async () => {
+  const handleStopComplete = useCallback(() => {
     setSession((prev) => {
       if (!prev) return prev;
 
@@ -117,7 +161,11 @@ export default function App() {
         return prev;
       }
 
-      if (note.dbSessionId && prev.dbSessionId && note.dbSessionId !== prev.dbSessionId) {
+      if (
+        note.dbSessionId &&
+        prev.dbSessionId &&
+        note.dbSessionId !== prev.dbSessionId
+      ) {
         isStale = true;
         return prev;
       }
@@ -139,11 +187,11 @@ export default function App() {
     const ok = await createNote(note, currentDbSessionId);
 
     if (!ok) {
-      setSession((prev) => (
+      setSession((prev) =>
         prev
           ? { ...prev, notes: prev.notes.filter((n) => n.id !== note.id) }
           : prev
-      ));
+      );
       setGlobalNotes((prev) => prev.filter((n) => n.id !== note.id));
       return false;
     }
