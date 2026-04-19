@@ -1,40 +1,53 @@
 import { supabase } from "../lib/supabase";
 
-const unavailable = (fn) => {
-  console.warn(`[notes] ${fn}: Supabase unavailable - skipping.`);
-};
+export function buildRouteStopKey(stopNumber) {
+  const n = Number(stopNumber);
+  return Number.isFinite(n) && n > 0 ? `stop-${n}` : null;
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeLocationKey(value) {
+  const cleaned = String(value || "").trim().toLowerCase();
+  return cleaned || null;
+}
 
 export async function createNote(note, sessionId) {
-  if (!supabase) {
-    unavailable("createNote");
+  const text = normalizeText(note?.text);
+
+  if (!sessionId) {
+    console.error("[notes.createNote] Missing sessionId");
     return false;
   }
 
-  const text = typeof note?.text === "string" ? note.text.trim() : "";
+  if (!text) {
+    console.error("[notes.createNote] Empty note text");
+    return false;
+  }
+
   const stopNumber = Number(note?.stopNumber);
+  const routeStopKey =
+    note?.routeStopKey ?? buildRouteStopKey(stopNumber) ?? null;
 
-  if (!sessionId || !text || !Number.isFinite(stopNumber) || stopNumber < 1) {
-    console.error("[notes] createNote: invalid payload");
-    return false;
-  }
-
-  const base = {
+  const payload = {
+    route_session_id: sessionId,
     text,
-    created_at: new Date(note.createdAt || Date.now()).toISOString(),
-    stop_number: stopNumber,
-    route_stop_key: note.routeStopKey ?? stopNumber,
-    location_key: note.locationKey ?? null,
+    stop_number: Number.isFinite(stopNumber) ? stopNumber : null,
+    route_stop_key: routeStopKey,
+    location_key: normalizeLocationKey(note?.locationKey),
+    source: note?.source || "typed",
+
+    // New durable links
+    stop_id: note?.stopId || null,
+    location_id: note?.locationId || null,
   };
 
-  const rows = [
-    { ...base, route_session_id: sessionId, scope: "session" },
-    { ...base, route_session_id: null, scope: "global" },
-  ];
-
-  const { error } = await supabase.from("notes").insert(rows);
+  const { error } = await supabase.from("notes").insert(payload);
 
   if (error) {
-    console.error("[notes] createNote:", error.message);
+    console.error("[notes.createNote] Insert failed:", error);
     return false;
   }
 
@@ -42,51 +55,52 @@ export async function createNote(note, sessionId) {
 }
 
 export async function getSessionNotes(sessionId) {
-  if (!supabase) {
-    unavailable("getSessionNotes");
-    return [];
-  }
+  if (!sessionId) return [];
 
   const { data, error } = await supabase
     .from("notes")
     .select("*")
     .eq("route_session_id", sessionId)
-    .eq("scope", "session")
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error("[notes] getSessionNotes:", error.message);
+    console.error("[notes.getSessionNotes] Query failed:", error);
     return [];
   }
-  return data.map(dbRowToNote);
+
+  return (data || []).map(mapNoteRow);
 }
 
 export async function getGlobalNotes() {
-  if (!supabase) {
-    unavailable("getGlobalNotes");
-    return [];
-  }
-
   const { data, error } = await supabase
     .from("notes")
     .select("*")
-    .eq("scope", "global")
-    .order("created_at", { ascending: true });
+    .not("location_key", "is", null)
+    .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("[notes] getGlobalNotes:", error.message);
+    console.error("[notes.getGlobalNotes] Query failed:", error);
     return [];
   }
-  return data.map(dbRowToNote);
+
+  return (data || []).map(mapNoteRow);
 }
 
-function dbRowToNote(row) {
+function mapNoteRow(row) {
   return {
     id: row.id,
     text: row.text,
-    createdAt: new Date(row.created_at).getTime(),
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     stopNumber: row.stop_number,
     routeStopKey: row.route_stop_key,
-    locationKey: row.location_key ?? null,
+    locationKey: row.location_key,
+    source: row.source || "typed",
+
+    // New durable links
+    stopId: row.stop_id || null,
+    locationId: row.location_id || null,
+
+    // Keep compatibility with current UI/session logic
+    dbSessionId: row.route_session_id || null,
   };
 }
