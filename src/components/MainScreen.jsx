@@ -33,7 +33,11 @@ function getSupportedMimeType() {
 
 async function transcribeAudio(blob, signal) {
   const formData = new FormData();
-  formData.append("file", blob, blob.type.includes("mp4") ? "audio.mp4" : "audio.webm");
+  formData.append(
+    "file",
+    blob,
+    blob.type.includes("mp4") ? "audio.mp4" : "audio.webm"
+  );
 
   const res = await fetch("/.netlify/functions/transcribe", {
     method: "POST",
@@ -50,8 +54,23 @@ async function transcribeAudio(blob, signal) {
   return (json.text || "").trim();
 }
 
-export default function MainScreen({ session, globalNotes, onStopComplete, onSaveNote, onStartNewRoute }) {
-  const { totalStops, completedStops, startTime, targetFinishTime, notes, localSessionKey, dbSessionId } = session;
+export default function MainScreen({
+  session,
+  currentStop,
+  globalNotes,
+  onStopComplete,
+  onSaveNote,
+  onStartNewRoute,
+}) {
+  const {
+    totalStops,
+    completedStops,
+    startTime,
+    targetFinishTime,
+    notes,
+    localSessionKey,
+    dbSessionId,
+  } = session;
 
   const [, setTick] = useState(0);
   const [alertVisible, setAlertVisible] = useState(true);
@@ -81,19 +100,21 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
     setAlertVisible(true);
   }, [completedStops]);
 
-  useEffect(() => () => {
-    clearTimeout(statusTimerRef.current);
-    clearTimeout(recordTimeoutRef.current);
-    cleanupRecorder();
+  useEffect(() => {
+    return () => {
+      clearTimeout(statusTimerRef.current);
+      clearTimeout(recordTimeoutRef.current);
+      cleanupRecorder();
+    };
   }, []);
 
   function cleanupRecorder() {
     const recorder = mediaRecorderRef.current;
+
     if (recorder && recorder.state !== "inactive") {
       try {
         recorder.stop();
-      } catch (_err) {
-      }
+      } catch (_err) {}
     }
 
     if (streamRef.current) {
@@ -116,6 +137,7 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
 
   async function commitNote(note) {
     const ok = await onSaveNote(note);
+
     if (!ok) {
       showStatus("Save failed", "error");
       return;
@@ -129,12 +151,16 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
 
   function handleLocSave() {
     if (!pendingNote) return;
-    commitNote({ ...pendingNote, locationKey: cleanLocationKey(locInput) });
+
+    commitNote({
+      ...pendingNote,
+      locationKey: cleanLocationKey(locInput),
+    });
   }
 
   function handleLocSkip() {
     if (!pendingNote) return;
-    commitNote({ ...pendingNote, locationKey: null });
+    commitNote(pendingNote);
   }
 
   async function startRecording() {
@@ -143,7 +169,15 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       return;
     }
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!currentStop) {
+      showStatus("No active stop", "error");
+      return;
+    }
+
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
       showStatus("Microphone not supported", "error");
       return;
     }
@@ -166,9 +200,12 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
       recordStartedAtRef.current = Date.now();
+
       recordingContextRef.current = {
-        stopNumber: completedStops + 1,
-        routeStopKey: completedStops + 1,
+        stopNumber: currentStop.sequence_number,
+        routeStopKey: currentStop.sequence_number,
+        stopId: currentStop.id,
+        locationId: currentStop.location_id,
         localSessionKey,
         dbSessionId,
       };
@@ -201,6 +238,7 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         }
 
         const blob = new Blob(chunks, { type: blobType });
+
         if (blob.size < MIN_BLOB_BYTES) {
           setRecordingPhase("idle");
           showStatus("Could not hear speech", "info");
@@ -215,7 +253,10 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
 
         while (attempt <= TRANSCRIBE_RETRIES && !transcript) {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
+          const timeoutId = setTimeout(
+            () => controller.abort(),
+            TRANSCRIBE_TIMEOUT_MS
+          );
 
           try {
             transcript = await transcribeAudio(blob, controller.signal);
@@ -237,6 +278,8 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
             createdAt: Date.now(),
             stopNumber: context.stopNumber,
             routeStopKey: context.routeStopKey,
+            stopId: context.stopId,
+            locationId: context.locationId,
             locationKey: null,
             localSessionKey: context.localSessionKey,
             dbSessionId: context.dbSessionId,
@@ -248,6 +291,7 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
 
         console.error("[MainScreen] transcribeAudio:", lastError);
         const message = lastError?.message || "Transcription failed";
+
         if (/timeout/i.test(message)) {
           showStatus("Transcription timed out", "error");
         } else if (/speech|hear|short|empty/i.test(message)) {
@@ -262,7 +306,10 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       setVoiceStatus(null);
 
       recordTimeoutRef.current = setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        if (
+          mediaRecorderRef.current &&
+          mediaRecorderRef.current.state === "recording"
+        ) {
           mediaRecorderRef.current.stop();
         }
       }, MAX_RECORDING_MS);
@@ -275,17 +322,22 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
   }
 
   function stopRecording() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state === "recording"
+    ) {
       mediaRecorderRef.current.stop();
     }
   }
 
   function handleVoiceTap() {
     if (isTranscribing) return;
+
     if (isRecording) {
       stopRecording();
       return;
     }
+
     startRecording();
   }
 
@@ -297,11 +349,19 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
   const remaining = totalStops - completedStops;
   const routeDone = remaining === 0;
   const nextStop = completedStops + 1;
-  const pace = getPaceLabel(completedStops, totalStops, startTime, targetFinishTime);
+  const pace = getPaceLabel(
+    completedStops,
+    totalStops,
+    startTime,
+    targetFinishTime
+  );
   const color = paceColor(pace);
   const noteCount = notes.filter(isValidNote).length;
 
-  const sessionStopNotes = notes.filter((n) => n.stopNumber === nextStop && isValidNote(n));
+  const sessionStopNotes = notes.filter(
+    (n) => n.stopNumber === nextStop && isValidNote(n)
+  );
+
   const currentLocationKey = sessionStopNotes.length
     ? mostRecent(sessionStopNotes).locationKey || null
     : null;
@@ -318,11 +378,18 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
       : "--:--";
   }
 
-  const alertResult = getActiveAlert(notes, globalNotes, nextStop, currentLocationKey);
+  const alertResult = getActiveAlert(
+    notes,
+    globalNotes,
+    nextStop,
+    currentLocationKey
+  );
   const activeAlert = alertResult ? alertResult.note : null;
   const alertSource = alertResult ? alertResult.source : null;
   const alertLabel = activeAlert
-    ? `${alertSource === "global" ? "PREV · " : ""}${getAlertLabel(activeAlert.text)} · Stop #${nextStop}`
+    ? `${alertSource === "global" ? "PREV · " : ""}${getAlertLabel(
+        activeAlert.text
+      )} · Stop #${nextStop}`
     : null;
 
   const voiceBtnLabel = isTranscribing
@@ -341,20 +408,26 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
     "dr-btn-complete",
     routeDone ? "done" : "",
     isRecording || isTranscribing || pendingNote ? "locked" : "",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="dr">
       <div className="dr-status">
         <div className="dr-pace">
           <div className="dr-pace-dot" style={{ background: color }} />
-          <span className="dr-pace-text" style={{ color }}>{pace}</span>
+          <span className="dr-pace-text" style={{ color }}>
+            {pace}
+          </span>
         </div>
+
         <div className="dr-status-right">
           <div className="dr-finish">
             <span className="dr-finish-label">Finish</span>
             <span className="dr-finish-time">{finishDisplay}</span>
           </div>
+
           <button
             className={"dr-notes-btn" + (noteCount > 0 ? " has-notes" : "")}
             onClick={() => setNotesOpen(true)}
@@ -373,8 +446,19 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
           preserveAspectRatio="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          <polyline points="30,62 90,48 160,30 230,42 295,18 370,26 415,16" fill="none" stroke="#1e3a5f" strokeWidth={3} strokeDasharray="7 5" />
-          <polyline points="30,62 90,48 160,30 230,42 295,18" fill="none" stroke="#3b82f6" strokeWidth={3.5} />
+          <polyline
+            points="30,62 90,48 160,30 230,42 295,18 370,26 415,16"
+            fill="none"
+            stroke="#1e3a5f"
+            strokeWidth={3}
+            strokeDasharray="7 5"
+          />
+          <polyline
+            points="30,62 90,48 160,30 230,42 295,18"
+            fill="none"
+            stroke="#3b82f6"
+            strokeWidth={3.5}
+          />
           <circle cx={30} cy={62} r={5} fill="#22c55e" />
           <circle cx={295} cy={18} r={11} fill="none" stroke="#60a5fa" strokeWidth={2.5} />
           <circle cx={295} cy={18} r={5} fill="#60a5fa" />
@@ -387,17 +471,28 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
         <button className={completeBtnClass} onClick={handleStopComplete}>
           {routeDone ? "ROUTE DONE" : "STOP COMPLETE"}
           <span className="dr-btn-complete-sub">
-            {routeDone ? `all ${totalStops} stops delivered` : `${completedStops} done · ${remaining} left`}
+            {routeDone
+              ? `all ${totalStops} stops delivered`
+              : `${completedStops} done · ${remaining} left`}
           </span>
         </button>
 
         <button
-          className={"dr-btn-voice" + (isRecording ? " recording" : "") + (isTranscribing ? " transcribing" : "")}
+          className={
+            "dr-btn-voice" +
+            (isRecording ? " recording" : "") +
+            (isTranscribing ? " transcribing" : "")
+          }
           onClick={handleVoiceTap}
         >
           <div className="voice-dot-row">
             <div className="voice-dot" />
-            <span className={"dr-voice-label" + (isRecording || isTranscribing ? " recording-label" : "")}>
+            <span
+              className={
+                "dr-voice-label" +
+                (isRecording || isTranscribing ? " recording-label" : "")
+              }
+            >
               {voiceBtnLabel}
             </span>
           </div>
@@ -424,8 +519,12 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
             }}
             autoFocus
           />
-          <button className="dr-loc-save" onClick={handleLocSave}>Save</button>
-          <button className="dr-loc-skip" onClick={handleLocSkip}>Skip</button>
+          <button className="dr-loc-save" onClick={handleLocSave}>
+            Save
+          </button>
+          <button className="dr-loc-skip" onClick={handleLocSkip}>
+            Skip
+          </button>
         </div>
       )}
 
@@ -435,7 +534,12 @@ export default function MainScreen({ session, globalNotes, onStopComplete, onSav
             <span className="dr-alert-label">{alertLabel}</span>
             <span className="dr-alert-value">{activeAlert.text}</span>
           </div>
-          <div className="dr-alert-dismiss" onClick={() => setAlertVisible(false)}>✕</div>
+          <div
+            className="dr-alert-dismiss"
+            onClick={() => setAlertVisible(false)}
+          >
+            ✕
+          </div>
         </div>
       ) : routeDone ? (
         <div className="dr-complete-banner">
