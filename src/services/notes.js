@@ -38,8 +38,6 @@ export async function createNote(note, sessionId) {
     route_stop_key: routeStopKey,
     location_key: normalizeLocationKey(note?.locationKey),
     source: note?.source || "typed",
-
-    // New durable links
     stop_id: note?.stopId || null,
     location_id: note?.locationId || null,
   };
@@ -86,6 +84,23 @@ export async function getGlobalNotes() {
   return (data || []).map(mapNoteRow);
 }
 
+export async function getNotesForLocation(locationId) {
+  if (!locationId) return [];
+
+  const { data, error } = await supabase
+    .from("notes")
+    .select("*")
+    .eq("location_id", locationId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[notes.getNotesForLocation] Query failed:", error);
+    return [];
+  }
+
+  return (data || []).map(mapNoteRow);
+}
+
 function mapNoteRow(row) {
   return {
     id: row.id,
@@ -95,12 +110,8 @@ function mapNoteRow(row) {
     routeStopKey: row.route_stop_key,
     locationKey: row.location_key,
     source: row.source || "typed",
-
-    // New durable links
     stopId: row.stop_id || null,
     locationId: row.location_id || null,
-
-    // Keep compatibility with current UI/session logic
     dbSessionId: row.route_session_id || null,
   };
 }
