@@ -58,6 +58,7 @@ export default function MainScreen({
   session,
   currentStop,
   globalNotes,
+  locationNotes = [],
   onStopComplete,
   onSaveNote,
   onStartNewRoute,
@@ -98,7 +99,7 @@ export default function MainScreen({
 
   useEffect(() => {
     setAlertVisible(true);
-  }, [completedStops]);
+  }, [completedStops, currentStop?.id]);
 
   useEffect(() => {
     return () => {
@@ -412,6 +413,10 @@ export default function MainScreen({
     .filter(Boolean)
     .join(" ");
 
+  const visibleLocationNotes = locationNotes
+    .filter((note) => note && note.text)
+    .slice(0, 3);
+
   return (
     <div className="dr">
       <div className="dr-status">
@@ -466,6 +471,17 @@ export default function MainScreen({
         </svg>
         {!routeDone && <div className="dr-map-tag">NEXT: #{nextStop}</div>}
       </div>
+
+      {!routeDone && visibleLocationNotes.length > 0 && (
+        <div className="dr-location-notes">
+          <div className="dr-location-notes-title">LOCATION NOTES</div>
+          {visibleLocationNotes.map((note) => (
+            <div key={note.id} className="dr-location-note-item">
+              {note.text}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="dr-actions">
         <button className={completeBtnClass} onClick={handleStopComplete}>
