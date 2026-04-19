@@ -2,7 +2,13 @@ import React, { useState, useEffect, useRef } from "react";
 import NotesPanel from "./NotesPanel";
 import { formatTime } from "../utils/time";
 import { calcProjectedFinish, getPaceLabel, paceColor } from "../utils/pace";
-import { isValidNote, cleanLocationKey } from "../utils/notes";
+import {
+  getAlertLabel,
+  isValidNote,
+  mostRecent,
+  cleanLocationKey,
+  getActiveAlert,
+} from "../utils/notes";
 
 const MAX_RECORDING_MS = 90000;
 const MIN_RECORDING_MS = 1200;
@@ -68,6 +74,7 @@ export default function MainScreen({
   } = session;
 
   const [, setTick] = useState(0);
+  const [alertVisible, setAlertVisible] = useState(true);
   const [recordingPhase, setRecordingPhase] = useState("idle");
   const [voiceStatus, setVoiceStatus] = useState(null);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -89,6 +96,10 @@ export default function MainScreen({
     const id = setInterval(() => setTick((t) => t + 1), 15000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    setAlertVisible(true);
+  }, [completedStops, currentStop?.id]);
 
   useEffect(() => {
     return () => {
@@ -133,6 +144,7 @@ export default function MainScreen({
       return;
     }
 
+    setAlertVisible(true);
     setPendingNote(null);
     setLocInput("");
     showStatus("Saved", "saved");
@@ -347,6 +359,14 @@ export default function MainScreen({
   const color = paceColor(pace);
   const noteCount = notes.filter(isValidNote).length;
 
+  const sessionStopNotes = notes.filter(
+    (n) => n.stopNumber === nextStop && isValidNote(n)
+  );
+
+  const currentLocationKey = sessionStopNotes.length
+    ? mostRecent(sessionStopNotes).locationKey || null
+    : null;
+
   let finishDisplay;
   if (completedStops === 0) {
     finishDisplay = targetFinishTime ? formatTime(targetFinishTime) : "--:--";
@@ -358,6 +378,20 @@ export default function MainScreen({
       ? formatTime(targetFinishTime)
       : "--:--";
   }
+
+  const alertResult = getActiveAlert(
+    notes,
+    globalNotes,
+    nextStop,
+    currentLocationKey
+  );
+  const activeAlert = alertResult ? alertResult.note : null;
+  const alertSource = alertResult ? alertResult.source : null;
+  const alertLabel = activeAlert
+    ? `${alertSource === "global" ? "PREV · " : ""}${getAlertLabel(
+        activeAlert.text
+      )} · Stop #${nextStop}`
+    : null;
 
   const voiceBtnLabel = isTranscribing
     ? "TRANSCRIBING..."
@@ -510,14 +544,27 @@ export default function MainScreen({
         </div>
       )}
 
-      {routeDone && (
+      {!routeDone && activeAlert && alertVisible ? (
+        <div className={"dr-alert" + (alertSource === "global" ? " prev" : "")}>
+          <div className="dr-alert-body">
+            <span className="dr-alert-label">{alertLabel}</span>
+            <span className="dr-alert-value">{activeAlert.text}</span>
+          </div>
+          <div
+            className="dr-alert-dismiss"
+            onClick={() => setAlertVisible(false)}
+          >
+            ✕
+          </div>
+        </div>
+      ) : routeDone ? (
         <div className="dr-complete-banner">
           <span>Route Complete</span>
           <button className="dr-btn-new-route" onClick={onStartNewRoute}>
             START NEW ROUTE
           </button>
         </div>
-      )}
+      ) : null}
 
       {notesOpen && <NotesPanel notes={notes} onClose={() => setNotesOpen(false)} />}
     </div>
