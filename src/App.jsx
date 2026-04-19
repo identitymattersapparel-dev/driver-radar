@@ -46,9 +46,6 @@ export default function App() {
             notes: sessionNotes,
             localSessionKey: makeLocalSessionKey(),
             dbSessionId: activeRow.id,
-
-            // Step 7 foundation:
-            // older active sessions may not have hydrated stops loaded yet
             stops: [],
           });
         }
@@ -85,7 +82,9 @@ export default function App() {
 
       dbSessionIdRef.current = row.id;
 
-      const inputStops = Array.isArray(localSession.stops) ? localSession.stops : [];
+      const inputStops = Array.isArray(localSession.stops)
+        ? localSession.stops
+        : [];
       const createdStops = [];
 
       for (let i = 0; i < inputStops.length; i += 1) {
@@ -207,9 +206,15 @@ export default function App() {
     return <StartScreen onStart={handleStart} />;
   }
 
+  const currentStop =
+    session?.stops?.find(
+      (stop) => stop.sequence_number === session.completedStops + 1
+    ) || null;
+
   return (
     <MainScreen
       session={session}
+      currentStop={currentStop}
       globalNotes={globalNotes}
       onStopComplete={handleStopComplete}
       onSaveNote={handleSaveNote}
